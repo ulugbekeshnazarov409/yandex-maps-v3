@@ -7,10 +7,15 @@ description: >-
   controls (zoom, geolocation, buttons, YMapOpenMapsButton), YMapListener events,
   hints & popups, the @yandex/ymaps3-clusterer marker clusterer, themes
   (dark/light), geolocation, behaviors, and the React/Next.js reactify pattern
-  (App Router, SSR-safe dynamic import). Use whenever building, debugging, or
-  extending a Yandex map in a web/React/Next.js app — adding markers, popups,
-  clustering, controls, geocoding, or fixing the lng/lat order, the api key,
-  ymaps3.ready, or reactify.bindTo.
+  (App Router, SSR-safe dynamic import). Also covers the separate HTTP API
+  products — Geosuggest (address autocomplete), Geocoder (forward + reverse),
+  Places/POI search, and Routing (build + draw routes) — plus YMapFeature
+  polygons/polylines (districts, route lines), draggable markers, viewport-based
+  marker loading at scale, satellite/raster layers, scheme customization
+  (styling), and v2→v3 migration. Use whenever building, debugging, or extending
+  a Yandex map in a web/React/Next.js app — adding markers, popups, clustering,
+  controls, search, autocomplete, geocoding, reverse geocoding, routes, polygons,
+  or fixing the lng/lat order, the api key, ymaps3.ready, or reactify.bindTo.
 ---
 
 # Yandex Maps JavaScript API v3 (ymaps3)
@@ -27,8 +32,13 @@ React wrapper (reactify).
 For exhaustive detail load the bundled references:
 - `reference/api.md` — every class/type with props.
 - `reference/recipes.md` — copy-paste Next.js App Router patterns (loader,
-  markers+popup, clusterer, controls, geolocation, theme sync, fit-bounds).
+  markers+popup, clusterer, controls, geolocation, theme sync, fit-bounds,
+  autocomplete search, polygon/route features, draggable marker, viewport-fetch,
+  satellite/customization).
 - `reference/packages.md` — importable `@yandex/*` modules.
+- `reference/search-geocode-routing.md` — the separate HTTP APIs: Geosuggest
+  (autocomplete), Geocoder (forward + reverse), Places/POI search, and Routing
+  (build + draw a route). Each is its own API key.
 
 ---
 
@@ -265,7 +275,27 @@ re-apply.
 Full SSR-safe Next.js component (script injection + cleanup + theme + markers +
 popup + fit-bounds) is in `reference/recipes.md`.
 
-## 12. Troubleshooting
+## 12. Search, geocoding, routing, satellite, migration
+
+- **Search / autocomplete / geocode / routes are NOT in the JS API** — they're separate
+  Yandex HTTP API products (Geosuggest, Geocoder, Places, Router), each with its **own key**.
+  Proxy them through your server (cache + rate-limit), then feed results to the map. Full
+  examples → `reference/search-geocode-routing.md`. Coordinate trap: Geocoder uses
+  `"lng lat"`; Geosuggest/Router use `lat,lon`.
+- **Satellite:** v3 core has **no satellite layer** — add a raster-tile `YMapLayer` + tile
+  data source, or use `ymap3-components`' `YMapDefaultSatelliteLayer`. Recolor/declutter the
+  vector base via the `YMapDefaultSchemeLayer` **`customization`** prop (tags + elements +
+  stylers). Recipe #12.
+- **Property marketplace at scale:** never render all markers — load by **viewport** on
+  camera idle (recipe #11), show **price** markers, and cluster server-side (PostGIS
+  `ST_ClusterDBSCAN`) below ~zoom 15. Mirrors the mobile `yandex-mapkit-sdk` constitution.
+- **Migrating from v2 (`ymaps`)?** Key breaks: global is now **`ymaps3`** (`await
+  ymaps3.ready`, not `ymaps.ready`); coordinates flipped to **`[lng, lat]`**; `Placemark` →
+  `YMapMarker`/`YMapDefaultMarker`; `GeoObject`/`ObjectManager` → `YMapFeature` + clusterer;
+  `multiRoute` editor is **gone** (use the Router HTTP API + draw a `YMapFeature` line);
+  React is via **reactify**. See the official upgrade guide.
+
+## 13. Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|

@@ -186,7 +186,126 @@ React.useEffect(() => { const map = new ymaps3.YMap(el, opts); return () => map.
 ## 7. Geocoding (address → coordinates)
 
 The JS API focuses on the map; for address↔coordinate use the **Geocoder HTTP
-API** (same key) server-side:
-`https://geocode-maps.yandex.ru/1.x/?apikey=KEY&format=json&geocode=<address>`
+API** (separate key) server-side:
+`https://geocode-maps.yandex.ru/v1/?apikey=KEY&format=json&geocode=<address>`
 → parse `response.GeoObjectCollection.featureMember[].GeoObject.Point.pos`
-(returns `"lng lat"`). Call it from a server route to keep the key usage clean.
+(returns `"lng lat"`). Full search/suggest/reverse/routing → `search-geocode-routing.md`.
+
+## 8. Address autocomplete search box (Geosuggest → recenter)
+
+```tsx
+function SearchBox({ onPick }: { onPick: (lng: number, lat: number, label: string) => void }) {
+  const [q, setQ] = React.useState("")
+  const [items, setItems] = React.useState<any[]>([])
+  React.useEffect(() => {
+    if (q.length < 3) { setItems([]); return }
+    const t = setTimeout(async () => {                       // debounce 250ms
+      const r = await fetch(`/api/suggest?text=${encodeURIComponent(q)}`)  // server route, see search-geocode-routing.md
+      setItems((await r.json()).results ?? [])
+    }, 250)
+    return () => clearTimeout(t)
+  }, [q])
+  return (
+    <div className="search">
+      <input value={q} onChange={e => setQ(e.target.value)} placeholder="Manzil qidirish…" />
+      {items.map((it, i) => (
+        <button key={i} onClick={async () => {
+          const g = await fetch(`/api/geocode?q=${encodeURIComponent(it.address?.formatted_address ?? it.title.text)}`)
+          const { lng, lat } = await g.json()
+          onPick(lng, lat, it.title.text)                    // map.update({ location:{ center:[lng,lat], zoom:16 } })
+        }}>{it.title.text}<small>{it.subtitle?.text}</small></button>
+      ))}
+    </div>
+  )
+}
+```
+
+## 9. YMapFeature — draw a district polygon + a route line
+
+```tsx
+const { YMapFeature } = comps
+// District boundary (GeoJSON Polygon: array of linear rings, each [lng,lat])
+<YMapFeature
+  geometry={{ type: "Polygon", coordinates: [districtRing] }}
+  style={{ stroke: [{ color: "#38463A", width: 2 }], fill: "#38463A", fillOpacity: 0.12 }}
+  onClick={() => selectDistrict(id)}
+/>
+// Route / road line (LineString)
+<YMapFeature
+  geometry={{ type: "LineString", coordinates: routePoints }}
+  style={{ stroke: [{ color: "#2563eb", width: 5 }] }}
+/>
+```
+Point-in-polygon ("which district is this listing in?") belongs on the **server** with
+PostGIS `ST_Contains` — don't compute it client-side.
+
+## 10. Draggable marker (drag → reverse geocode → update form)
+
+```tsx
+<YMapMarker
+  coordinates={coords}
+  draggable
+  mapFollowsOnDrag
+  onDragEnd={async (c: [number, number]) => {
+    setCoords(c)
+    const r = await fetch(`/api/reverse?lng=${c[0]}&lat=${c[1]}`) // server reverse-geocode
+    setAddress((await r.json()).address)
+  }}
+>
+  <div className="map-pin"><span className="map-pin-dot" /></div>
+</YMapMarker>
+```
+Used for "drop the pin on your property" — the marker reports `[lng, lat]`; reverse-geocode
+on the server and fill the address field.
+
+## 11. Viewport-driven marker loading (property marketplace, scales to 1M objects)
+
+Never render all properties. Fetch only what's in the visible bounds on camera idle.
+
+```tsx
+const { YMap, YMapDefaultSchemeLayer, YMapDefaultFeaturesLayer, YMapMarker, YMapListener } = comps
+const [pins, setPins] = React.useState<Pin[]>([])
+
+const onUpdate = React.useMemo(() => {
+  let t: any
+  return ({ location }: any) => {                 // fires on every pan/zoom
+    clearTimeout(t)
+    t = setTimeout(async () => {                  // debounce ~250ms
+      const b = location.bounds                   // [[swLng,swLat],[neLng,neLat]]
+      const zoom = Math.round(location.zoom)
+      // L2 cache (React Query) → server → returns ONLY visible objects (or server clusters if zoom low)
+      const r = await fetch(`/api/map?w=${b[0][0]}&s=${b[0][1]}&e=${b[1][0]}&n=${b[1][1]}&zoom=${zoom}`)
+      setPins(await r.json())
+    }, 250)
+  }
+}, [])
+
+<YMap location={initial}>
+  <YMapDefaultSchemeLayer /><YMapDefaultFeaturesLayer />
+  <YMapListener layer="any" onUpdate={onUpdate} />
+  {pins.map(p => <YMapMarker key={p.id} coordinates={[p.lng, p.lat]}><div className="price-tag">${p.price}</div></YMapMarker>)}
+</YMap>
+```
+Below ~zoom 15 the server returns **clusters** (PostGIS `ST_ClusterDBSCAN`), not raw
+points — draw cluster bubbles instead. Show **price** markers, not generic pins. (Mirror
+the mobile `yandex-mapkit-sdk` → `architecture.md` constitution.)
+
+## 12. Satellite / hybrid + scheme customization
+
+v3 core has **no satellite layer** — add a raster tile `YMapLayer` + tile data source, or
+use `ymap3-components`' `YMapDefaultSatelliteLayer`. Recolor/declutter the vector scheme
+via the `customization` prop:
+
+```tsx
+// hide POIs + dim roads on the base scheme
+<YMapDefaultSchemeLayer
+  customization={[
+    { tags: { any: ["poi"] }, elements: "label", stylers: [{ visibility: "off" }] },
+    { tags: { any: ["road"] }, elements: "geometry", stylers: [{ color: "#e5e7eb" }] },
+  ]}
+/>
+// satellite via a custom raster layer (vanilla): new ymaps3.YMapLayer + YMapTileDataSource
+// pointing at your satellite tile URL template; or:  import { YMapDefaultSatelliteLayer } from 'ymap3-components'
+```
+Build the `customization` rules with Yandex's style spec (tags + elements + stylers:
+color, opacity, visibility, lightness, saturation).
