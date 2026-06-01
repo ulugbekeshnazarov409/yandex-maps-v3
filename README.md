@@ -1,5 +1,7 @@
 # yandex-maps-v3
 
+[![skills.sh](https://skills.sh/b/ulugbekeshnazarov409/yandex-maps-v3)](https://skills.sh/ulugbekeshnazarov409/yandex-maps-v3)
+
 An [agent skill](https://www.skills.sh) for the **Yandex Maps JavaScript API v3** (`ymaps3`)
 — a complete reference and integration guide for building Yandex maps in web / React /
 Next.js apps.
